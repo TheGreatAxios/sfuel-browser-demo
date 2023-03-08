@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>sFUEL Station - Barebones</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.2/web3.min.js" integrity="sha512-Ls8WO4Esu7Jb9a92BfIp1Ftgl9t5Ncaa/6zKzpOkTGXW+dPcJcI4Yz2HR7cXY0YcfIAsL7R9Gqfbw8ERX8iYaA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script src="https://cdn.jsdelivr.net/npm/bn.js@5.2.1/lib/bn.min.js"></script>
+
+        <script type="module">
+            const DIFFICULTY = new BN(1);
+
+
+            async function mineGasForTransaction(web3, tx) {
+                if(tx.from === undefined || tx.nonce === undefined) {
+                    throw new Error("Not enough fields for mining gas (from, nonce)")
+                }
+                if (!tx.gas) {
+                    tx.gas = await web3.eth.estimateGas(tx)
+                }
+                let address = tx.from
+                let nonce = web3.utils.isHex(tx.nonce) ? web3.utils.hexToNumber(tx.nonce) : tx.nonce;
+                let gas = web3.utils.isHex(tx.gas) ? web3.utils.hexToNumber(tx.gas) : tx.gas;
+                tx.gasPrice = mineFreeGas(gas, address, nonce, web3);
+            }
+
+            /**
+            *
+            * Credit to https://stackoverflow.com/a/68796056
+            */
+            function _getRandomBytes(numBytes = 32) {
+                const bytes = crypto.getRandomValues(new Uint8Array(numBytes));
+                const array = Array.from(bytes);
+                const hexPairs = array.map(b => b.toString(16).padStart(2, '0'));
+                return hexPairs.join('')
+            }
+
+            function mineFreeGas(gasAmount, address, nonce, web3) {
+                console.log('Mining free gas: ', gasAmount);
+                let nonceHash = new BN(web3.utils.soliditySha3(nonce).slice(2), 16)
+                let addressHash = new BN(web3.utils.soliditySha3(address).slice(2), 16)
+                let nonceAddressXOR = nonceHash.xor(addressHash)
+                let maxNumber = new BN(2).pow(new BN(256)).sub(new BN(1));
+                let divConstant = maxNumber.div(DIFFICULTY);
+                let candidate;
+                while (true) {
+                    candidate = new BN(_getRandomBytes(), 16);
+                    let candidateHash = new BN(web3.utils.soliditySha3(candidate).slice(2), 16);
+                    let resultHash = nonceAddressXOR.xor(candidateHash);
+                    let externalGas = divConstant.div(resultHash).toNumber();
+                    if (externalGas >= gasAmount) {
+                        break;
+                    }
+                }
+                return candidate.toString();
+            }
+
+            async function claimsFUEL() {
+                    // "data": web3.utils.toHex("0x0c11dedd000000000000000000000000" + address.substring(0, 2)), -->
+                    const web3 = new Web3("https://staging-v3.skalenodes.com/v1/staging-utter-unripe-menkar");
+                    const account = web3.eth.accounts.create();
+                    const address = account.address;
+                    console.log("Address: ", address)
+                    const pk = account.privateKey;
+                    let gas = 1000000;
+                    let nonce = await web3.eth.getTransactionCount(address)
+                    let tx = {
+                        "from": address,
+                        "to"  : "0xa9eC34461791162Cae8c312C4237C9ddd1D64336",
+                        "gas" : gas,
+                        "data": web3.eth.abi.encodeFunctionCall({
+                            name: 'pay',
+                            type: 'function',
+                            inputs: [{
+                                type: 'address',
+                                name: 'receiver'
+                            }]
+                        }, [address]),
+                        "nonce": nonce,
+                        "value": 0
+                    };
+                    console.log("Transaction: ", tx);
+                    await mineGasForTransaction(web3, tx);
+                    let signed = await web3.eth.accounts.signTransaction(tx, pk)
+                    return web3.eth.sendSignedTransaction(signed.rawTransaction)
+            }
+
+            window.onload = () => {
+                const el = document.getElementById("claim-sfuel")
+                el.addEventListener("click", async(e) => {
+                    console.log("HERE");
+                    await claimsFUEL()
+                })
+            }
+        </script>
+    </head>
+    <body>
+        sFUEL Station
+        <button id="claim-sfuel">Mine sFUEL</button>
+    </body>
+</html>
